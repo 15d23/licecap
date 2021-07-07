@@ -97,11 +97,11 @@ void WDL_VirtualIconButton::SetIcon(WDL_VirtualIconButton_SkinConfig *cfg, float
     if (m_iconCfg && m_iconCfg != cfg && m_iconCfg->olimage)
     {
       combineRects=true;
-      GetPositionPaintExtent(&r);
+      GetPositionPaintExtent(&r,WDL_VWND_SCALEBASE);
       if (WantsPaintOver())
       {
         RECT r3;
-        GetPositionPaintOverExtent(&r3);
+        GetPositionPaintOverExtent(&r3,WDL_VWND_SCALEBASE);
         if (r3.left<r.left) r.left=r3.left;
         if (r3.top<r.top) r.top=r3.top;
         if (r3.right>r.right) r.right=r3.right;
@@ -120,7 +120,7 @@ void WDL_VirtualIconButton::SetIcon(WDL_VirtualIconButton_SkinConfig *cfg, float
     if (combineRects)
     {
       RECT r3;
-      GetPositionPaintExtent(&r3);
+      GetPositionPaintExtent(&r3,WDL_VWND_SCALEBASE);
       if (r3.left<r.left) r.left=r3.left;
       if (r3.top<r.top) r.top=r3.top;
       if (r3.right>r.right) r.right=r3.right;
@@ -128,7 +128,7 @@ void WDL_VirtualIconButton::SetIcon(WDL_VirtualIconButton_SkinConfig *cfg, float
 
       if (WantsPaintOver())
       {
-        GetPositionPaintOverExtent(&r3);
+        GetPositionPaintOverExtent(&r3,WDL_VWND_SCALEBASE);
         if (r3.left<r.left) r.left=r3.left;
         if (r3.top<r.top) r.top=r3.top;
         if (r3.right>r.right) r.right=r3.right;
@@ -147,9 +147,9 @@ void WDL_VirtualIconButton::SetIcon(WDL_VirtualIconButton_SkinConfig *cfg, float
     }
   }
   m_ownsicon = buttonownsicon;
- }
+}
 
-void WDL_VirtualIconButton::OnPaintOver(LICE_IBitmap *drawbm, int origin_x, int origin_y, RECT *cliprect)
+void WDL_VirtualIconButton::OnPaintOver(LICE_IBitmap *drawbm, int origin_x, int origin_y, RECT *cliprect, int rscale)
 {
   if (m_iconCfg && m_iconCfg->olimage)
   {
@@ -184,7 +184,8 @@ void WDL_VirtualIconButton::OnPaintOver(LICE_IBitmap *drawbm, int origin_x, int 
         cfg.bgimage_noalphaflags=0;
 
         RECT r=m_position,r2;
-        GetPositionPaintOverExtent(&r2);
+        ScaleRect(&r,rscale);
+        GetPositionPaintOverExtent(&r2,rscale);
         WDL_VirtualWnd_ScaledBlitBG(drawbm,&cfg,
           r.left+origin_x,r.top+origin_y,r.right-r.left,r.bottom-r.top,
           r2.left+origin_x,r2.top+origin_y,r2.right-r2.left,r2.bottom-r2.top,
@@ -193,7 +194,7 @@ void WDL_VirtualIconButton::OnPaintOver(LICE_IBitmap *drawbm, int origin_x, int 
       else
       {
         RECT r;
-        GetPositionPaintOverExtent(&r);
+        GetPositionPaintOverExtent(&r,rscale);
         LICE_ScaledBlit(drawbm,m_iconCfg->olimage,r.left+origin_x,r.top+origin_y,
           r.right-r.left,
           r.bottom-r.top,
@@ -205,7 +206,7 @@ void WDL_VirtualIconButton::OnPaintOver(LICE_IBitmap *drawbm, int origin_x, int 
 }
 
 
-void WDL_VirtualIconButton::OnPaint(LICE_IBitmap *drawbm, int origin_x, int origin_y, RECT *cliprect) 
+void WDL_VirtualIconButton::OnPaint(LICE_IBitmap *drawbm, int origin_x, int origin_y, RECT *cliprect, int rscale) 
 { 
   int col;
 
@@ -220,6 +221,7 @@ void WDL_VirtualIconButton::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
     bool isdownimg = (swapupdown != isdown);
     
     RECT r=m_position;
+    ScaleRect(&r,rscale);
 
     int sx=0;
     int sy=0;
@@ -267,6 +269,7 @@ void WDL_VirtualIconButton::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
   else
   {
     RECT r=m_position;
+    ScaleRect(&r,rscale);
     r.left+=origin_x;
     r.right+=origin_x;
     r.top+=origin_y;
@@ -296,19 +299,17 @@ void WDL_VirtualIconButton::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
     }
     if (m_iconCfg && m_iconCfg->image)
     {
-      int sz=16,sz2=16;
-      WDL_STYLE_ScaleImageCoords(&sz,&sz2);
-
-      //if (m_position.right-m_position.left > 24) sz=m_position.right-m_position.left-8;
+      const int rscale2 = drawbm ? drawbm->Extended(LICE_EXT_GET_ADVISORY_SCALING,NULL) : 0;
+      const int sz=rscale2 ? 16*rscale2/256 : 16;
     
       int x=r.left+((r.right-r.left)-sz)/2;
-      int y=r.top+((r.bottom-r.top)-sz2)/2;
+      int y=r.top+((r.bottom-r.top)-sz)/2;
       if (m_is_button)
       {
         if (isdown && ishover) { x++; y++; }
       }
 
-      LICE_ScaledBlit(drawbm,m_iconCfg->image,x,y,sz,sz2,0.0f,0.0f,
+      LICE_ScaledBlit(drawbm,m_iconCfg->image,x,y,sz,sz,0.0f,0.0f,
         (float)m_iconCfg->image->getWidth(),
         (float)m_iconCfg->image->getHeight(),alpha,LICE_BLIT_MODE_COPY|LICE_BLIT_FILTER_BILINEAR|LICE_BLIT_USE_ALPHA);
 
@@ -318,6 +319,7 @@ void WDL_VirtualIconButton::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
   if (!m_iconCfg || m_forcetext)
   {
     RECT r2=m_position;
+    ScaleRect(&r2,rscale);
     r2.left+=origin_x;
     r2.right+=origin_x;
     r2.top+=origin_y;
@@ -327,11 +329,12 @@ void WDL_VirtualIconButton::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
     {
       RECT tr=r2;
       int sz=tr.bottom-tr.top;
-      r2.left+=sz+2;
+      int adj = 2*rscale/WDL_VWND_SCALEBASE;
+      r2.left+=sz+adj;
 
-      tr.top+=2;
-      tr.bottom-=2;
-      sz-=4;
+      tr.top+=adj;
+      tr.bottom-=adj;
+      sz-=adj*2;
       sz&=~1;
       LICE_FillRect(drawbm ,tr.left,tr.top,sz,sz,LICE_RGBA(255,255,255,255),alpha,LICE_BLIT_MODE_COPY);
       LICE_Line(drawbm,tr.left,tr.top,tr.left+sz,tr.top,LICE_RGBA(128,128,128,255),alpha,LICE_BLIT_MODE_COPY,false);
@@ -364,17 +367,17 @@ void WDL_VirtualIconButton::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
       font->SetBkMode(TRANSPARENT);
       font->SetTextColor(fgc);
 
-      r2.left += m_margin_l;
-      r2.right -= m_margin_r;
-      r2.top += m_margin_t;
-      r2.bottom -= m_margin_b;
+      r2.left += m_margin_l * rscale / WDL_VWND_SCALEBASE;
+      r2.right -= m_margin_r * rscale / WDL_VWND_SCALEBASE;
+      r2.top += m_margin_t * rscale / WDL_VWND_SCALEBASE;
+      r2.bottom -= m_margin_b * rscale / WDL_VWND_SCALEBASE;
 
       if (isdown)
       {
-        if (m_textalign<0) r2.left+=1;
-        else if (m_textalign>0) r2.right+=1;
-        else r2.left+=2;
-        r2.top+=2;
+        if (m_textalign<0) r2.left+= rscale / WDL_VWND_SCALEBASE;
+        else if (m_textalign>0) r2.right+= rscale / WDL_VWND_SCALEBASE;
+        else r2.left+=2 * rscale / WDL_VWND_SCALEBASE;
+        r2.top+=2 * rscale/WDL_VWND_SCALEBASE;
       }
       int f = DT_SINGLELINE|DT_NOPREFIX;
       if (isVert)
@@ -609,14 +612,17 @@ int WDL_VirtualComboBox::OnMouseDown(int xpos, int ypos)
       //SetFocus(h);
     }
     
+    WDL_VWND_DCHK(a);
+
     int ret=TrackPopupMenu(menu,TPM_LEFTALIGN|TPM_TOPALIGN|TPM_RETURNCMD|TPM_NONOTIFY,p.x,p.y,0,h,NULL);
 
-    if (ret>=1000)
+    DestroyMenu(menu);
+
+    if (ret>=1000 && a.isOK())
     {
       m_curitem=ret-1000;
       RequestRedraw(NULL);
     // track menu
-      WDL_VWND_DCHK(a);
       SendCommand(WM_COMMAND,GetID() | (CBN_SELCHANGE<<16),0,this);
       if (a.isOK() && m__iaccess) m__iaccess->OnStateChange();
     }
@@ -624,12 +630,13 @@ int WDL_VirtualComboBox::OnMouseDown(int xpos, int ypos)
   return -1;
 }
 
-void WDL_VirtualComboBox::OnPaint(LICE_IBitmap *drawbm, int origin_x, int origin_y, RECT *cliprect)
+void WDL_VirtualComboBox::OnPaint(LICE_IBitmap *drawbm, int origin_x, int origin_y, RECT *cliprect, int rscale)
 {
   {
     if (m_font) m_font->SetBkMode(TRANSPARENT);
 
-    RECT r=m_position;
+    RECT r;
+    WDL_VWnd::GetPositionPaintExtent(&r,rscale);
     r.left+=origin_x;
     r.right+=origin_x;
     r.top+=origin_y;
@@ -738,10 +745,10 @@ void WDL_VirtualStaticText::SetWantPreserveTrailingNumber(bool abbreviate)
   if (m_font) RequestRedraw(NULL); 
 }
 
-void WDL_VirtualStaticText::GetPositionPaintExtent(RECT *r)
+void WDL_VirtualStaticText::GetPositionPaintExtent(RECT *r, int rscale)
 {
   // overridden in case m_bkbm has outer areas
-  *r = m_position;
+  WDL_VWnd::GetPositionPaintExtent(r,rscale);
   if (m_bkbm && m_bkbm->bgimage)
   {
     if (m_bkbm->bgimage_lt[0]>0 &&
@@ -776,9 +783,10 @@ int WDL_VirtualStaticText::OnMouseDown(int xpos, int ypos)
   return 0;
 }
 
-void WDL_VirtualStaticText::OnPaint(LICE_IBitmap *drawbm, int origin_x, int origin_y, RECT *cliprect)
+void WDL_VirtualStaticText::OnPaint(LICE_IBitmap *drawbm, int origin_x, int origin_y, RECT *cliprect, int rscale)
 {
   RECT r=m_position;
+  ScaleRect(&r,rscale);
   r.left+=origin_x;
   r.right+=origin_x;
   r.top += origin_y;
@@ -857,10 +865,10 @@ void WDL_VirtualStaticText::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
 
   if (m_text.Get()[0])
   {
-    r.left += m_margin_l;
-    r.right -= m_margin_r;
-    r.top += m_margin_t;
-    r.bottom -= m_margin_b;
+    r.left += m_margin_l * rscale / WDL_VWND_SCALEBASE;
+    r.right -= m_margin_r * rscale / WDL_VWND_SCALEBASE;
+    r.top += m_margin_t * rscale / WDL_VWND_SCALEBASE;
+    r.bottom -= m_margin_b * rscale / WDL_VWND_SCALEBASE;
 
     m_didvert=m_vfont && (r.right-r.left)<(r.bottom-r.top)/2;
     LICE_IFont *font = m_didvert ? m_vfont : m_font;
@@ -910,7 +918,7 @@ void WDL_VirtualStaticText::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
 
       if (m_wantabbr)
       {
-        if (len && isdigit(txt[len-1]))
+        if (len && txt[len-1] > 0 && isdigit(txt[len-1]))
         {
           RECT tr = { 0, 0, 0, 0 };
           font->DrawText(drawbm, txt, -1, &tr, DT_SINGLELINE|DT_NOPREFIX|DT_CALCRECT);
@@ -920,7 +928,7 @@ void WDL_VirtualStaticText::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
             int i;
             for (i=len-1; i >= 0; --i)
             {
-              if (!isdigit(txt[i]) || len-i > 4) break;
+              if (txt[i] < 0 || !isdigit(txt[i]) || len-i > 4) break;
             }
             strcat(abbrbuf, txt+i+1);
 
@@ -973,91 +981,7 @@ void WDL_VirtualStaticText::OnPaint(LICE_IBitmap *drawbm, int origin_x, int orig
 
 
   }
-  WDL_VWnd::OnPaint(drawbm,origin_x,origin_y,cliprect);
-}
-
-
-int WDL_VirtualStaticText::GetCharFromCoord(int xpos, int ypos)
-{
-  LICE_IFont *font = (m_didvert ? m_vfont : m_font);
-  if (!font) return -1;
-  
-  const char* str = m_text.Get();
-  const int len = m_text.GetLength();
-  if (!len) return -1;
-
-  // for align left/right, we could DT_CALCRECT with 1 char, then 2, etc, but that won't work for align center
-  // so we'll just estimate
-  RECT tr = { 0, 0, m_position.right-m_position.left, m_position.bottom-m_position.top };
-  font->DrawText(0, str, len, &tr, DT_SINGLELINE|DT_NOPREFIX|DT_CALCRECT);
-  int tw = tr.right;
-  int th = tr.bottom;
-
-  RECT r = m_position;
-  if (m_wantborder)
-  {
-    r.left++;
-    r.top++;
-    r.right--;
-    r.bottom--;
-  }
-  r.left += m_margin_l;
-  r.top += m_margin_t;
-  r.right -= m_margin_r;
-  r.bottom -= m_margin_b;
-  int w = r.right-r.left;
-  int h = r.bottom-r.top;
-
-  if (m_didvert)
-  {
-    r.left += (w-tw)/2;
-    r.right -= (w-tw)/2;
-  }
-  else
-  {
-    r.top += (h-th)/2;
-    r.bottom -= (h-th)/2;
-  }
-
-  if (m_didalign < 0)
-  {
-    if (m_didvert) r.bottom = r.top+th;    
-    else r.right = r.left+tw;    
-  }
-  else if (m_didalign > 0)
-  {
-    if (m_didvert) r.top = r.bottom-th;
-    else r.left = r.right-tw;
-  }
-  else
-  {
-    if (m_didvert) 
-    {
-      r.top += (h-th)/2;
-      r.bottom -= (h-th)/2;
-    }
-    else
-    {
-      r.left += (w-tw)/2;
-      r.right -= (w-tw)/2;
-    }
-  }
-
-  int c=-1;
-  if (m_didvert)
-  {
-    if (ypos < r.top) c=-1;
-    else if (ypos > r.bottom) c=len;
-    else c = (int)((double)len*(double)(ypos-r.top)/(double)(r.bottom-r.top));
-  }
-  else
-  {
-    if (xpos < r.left) c=-1;
-    else if (xpos > r.right) c=len;
-    else c = (int)((double)len*(double)(xpos-r.left)/(double)(r.right-r.left));
-  }
-
-  return c;
+  WDL_VWnd::OnPaint(drawbm,origin_x,origin_y,cliprect,rscale);
 }
 
 
@@ -1074,12 +998,12 @@ bool WDL_VirtualStaticText::OnMouseDblClick(int xpos, int ypos)
 
 bool WDL_VirtualIconButton::WantsPaintOver()
 {
-  return m_is_button && m_iconCfg && m_iconCfg->image && m_iconCfg->olimage;
+  return /*m_is_button && */m_iconCfg && m_iconCfg->image && m_iconCfg->olimage;
 }
 
-void WDL_VirtualIconButton::GetPositionPaintOverExtent(RECT *r)
+void WDL_VirtualIconButton::GetPositionPaintOverExtent(RECT *r, int rscale)
 {
-  *r=m_position;
+  WDL_VWnd::GetPositionPaintOverExtent(r,rscale);
   if (m_iconCfg && m_iconCfg->image && m_iconCfg->olimage && (m_iconCfg->image_ltrb_used.flags&1))
   {
     if (m_iconCfg->image_ltrb_used.flags&2) // main image has pink lines, use 1:1 pixel for outer area size

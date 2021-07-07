@@ -410,7 +410,6 @@ int g_cap_state; // 1=rec, 2=pause
 
 #define PREROLL_AMT 3000
 DWORD g_cap_prerolluntil;
-DWORD g_skip_capture_until;
 DWORD g_last_frame_capture_time;
 
 #ifndef NO_LCF_SUPPORT
@@ -571,6 +570,8 @@ int g_insert_ms=g_titlems;
 double g_insert_alpha=0.5f;
 LICE_IBitmap *g_cap_bm_txt;  // is a LICE_SysBitmap
 
+#define MAX_PREROLL_OR_DELAY (1000 * 60 * 60 * 24)
+
 void UpdateStatusText(HWND hwndDlg)
 {
   if (!g_cap_state) return;
@@ -594,10 +595,10 @@ void UpdateStatusText(HWND hwndDlg)
 
   char pbuf[64];
   pbuf[0]=0;
-  DWORD now=timeGetTime();
+  const DWORD now=timeGetTime();
   if (g_cap_state==1 && g_cap_prerolluntil)
   {
-    if (now < g_cap_prerolluntil) snprintf(pbuf,sizeof(pbuf),"PREROLL: %d - ",(g_cap_prerolluntil-now+999)/1000);
+    if (WDL_TICKS_IN_RANGE_ENDING_AT(now,g_cap_prerolluntil,MAX_PREROLL_OR_DELAY)) snprintf(pbuf,sizeof(pbuf),"PREROLL: %d - ",(g_cap_prerolluntil-now+999)/1000);
   }
   else if (g_cap_state == 2) 
   {
@@ -652,8 +653,8 @@ void UpdateCaption(HWND hwndDlg)
     pbuf[0]=0;
     if (g_cap_state==1 && g_cap_prerolluntil)
     {
-      DWORD now=timeGetTime();
-      if (now < g_cap_prerolluntil)
+      const DWORD now=timeGetTime();
+      if (WDL_TICKS_IN_RANGE_ENDING_AT(now,g_cap_prerolluntil,MAX_PREROLL_OR_DELAY))
       {
         snprintf(pbuf,sizeof(pbuf),"PREROLL: %d - ",(g_cap_prerolluntil-now+999)/1000);
       }
@@ -1125,8 +1126,10 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
 #elif defined(__APPLE__)
       extern void SWELL_SetWindowShadow(HWND, bool);
       void SetNSWindowOpaque(HWND, bool);
+      void SetNSWindowTransparent(HWND);
       SWELL_SetWindowShadow(hwndDlg,false);
       SetNSWindowOpaque(hwndDlg,false);
+      SetNSWindowTransparent(hwndDlg);
 #endif
 
       g_wndsize.init(hwndDlg);
@@ -1206,12 +1209,12 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
     case WM_TIMER:
       if (wParam==1)
       {     
-        DWORD now=timeGetTime();
+        const DWORD now=timeGetTime();
         bool need_stop=false;
 
-        if (g_cap_state==1 && g_cap_bm && now >= g_cap_prerolluntil && now >= g_skip_capture_until)
+        if (g_cap_state==1 && g_cap_bm && (!g_cap_prerolluntil || !WDL_TICKS_IN_RANGE_ENDING_AT(now,g_cap_prerolluntil,MAX_PREROLL_OR_DELAY)))
         {
-          if (now >= g_last_frame_capture_time + (1000/(wdl_max(g_max_fps,1))))
+          if (now-g_last_frame_capture_time >= (1000/(wdl_max(g_max_fps,1))))
           {
             g_ms_written += now-g_last_frame_capture_time;
 
@@ -1273,7 +1276,7 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
               {
                 if (dotime) draw_timedisp(g_cap_bm,frame_time_in_seconds,NULL,bw,bh);
 
-                int del = now-g_last_frame_capture_time;
+                int del = (int) (now-g_last_frame_capture_time);
                 if (g_dotitle)
                 {
                   del += g_titlems;
@@ -1382,16 +1385,16 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
         {
           static DWORD lproll;
           static int lcnt;
-          if (lproll != g_cap_prerolluntil || (g_cap_prerolluntil-now+999)/1000 != lcnt)
+          if (lproll != g_cap_prerolluntil || ((g_cap_prerolluntil-now)+999)/1000 != lcnt)
           {
-            lcnt=(g_cap_prerolluntil-now+999)/1000;
+            lcnt=((g_cap_prerolluntil-now)+999)/1000;
             lproll=g_cap_prerolluntil;
             UpdateCaption(hwndDlg);
             force_status=true;
           }
         }
         static DWORD last_status_t;
-        if (force_status || now > last_status_t+500)
+        if (force_status || now-last_status_t > 500)
         {
           last_status_t=now;
           UpdateStatusText(hwndDlg);
@@ -1416,12 +1419,24 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
         PAINTSTRUCT ps;
         if (BeginPaint(hwndDlg,&ps))
         {
-          RECT r;
-          void DrawTransparentRectInCurrentContext(RECT r);
+          RECT r,r2;
           GetWindowRect(GetDlgItem(hwndDlg,IDC_VIEWRECT),&r);
           ScreenToClient(hwndDlg,(LPPOINT)&r);
           ScreenToClient(hwndDlg,((LPPOINT)&r)+1);
-          DrawTransparentRectInCurrentContext(r);
+          GetClientRect(hwndDlg,&r2);
+
+          RECT tr = r2;
+          tr.right = r.left;
+          SWELL_FillDialogBackground(ps.hdc,&tr,0);
+          tr.left = r.right; tr.right = r2.right;
+          SWELL_FillDialogBackground(ps.hdc,&tr,0);
+          tr = r;
+          tr.bottom = r.top; tr.top = r2.top;
+          SWELL_FillDialogBackground(ps.hdc,&tr,0);
+          tr.top = r.bottom; tr.bottom = r2.bottom;
+          SWELL_FillDialogBackground(ps.hdc,&tr,0);
+          SWELL_FillDialogBackground(ps.hdc,&tr,0);
+
           HPEN pen = CreatePen(PS_SOLID,0,RGB(128,128,128));
           HGDIOBJ oldPen = SelectObject(ps.hdc,pen);
           
@@ -1669,6 +1684,11 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
               if (strlen(g_last_fn)>4 && !stricmp(g_last_fn+strlen(g_last_fn)-4,".lcf"))
               {
                 g_cap_lcf = new LICECaptureCompressor(g_last_fn,w,h);
+                if (!g_cap_lcf->IsOpen())
+                {
+                  delete g_cap_lcf;
+                  g_cap_lcf = NULL;
+                }
               }
 #endif
 
@@ -1722,7 +1742,7 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
                 g_frate_avg=0.0;
                 g_ms_written = 0;
 
-                g_last_frame_capture_time = g_cap_prerolluntil=timeGetTime()+PREROLL_AMT;
+                g_last_frame_capture_time = g_cap_prerolluntil = timeGetTime()+PREROLL_AMT;
                 g_cap_state=1;
                 UpdateCaption(hwndDlg);
                 UpdateStatusText(hwndDlg);
@@ -1782,7 +1802,8 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
 
       }
     break;
-
+#ifndef _WIN32
+    // win32 uses WM_NCHITTEST
     case WM_LBUTTONDOWN:
       SetCapture(hwndDlg);
       GetCursorPos(&s_last_mouse);
@@ -1806,12 +1827,10 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
     case WM_LBUTTONUP:
       ReleaseCapture();
     break;
-
+#endif
     case WM_MOVE:
-      //g_skip_capture_until = timeGetTime()+30;
     break;
     case WM_SIZE:
-     // g_skip_capture_until = timeGetTime()+30;
 
       if (wParam != SIZE_MINIMIZED)
       {
@@ -1819,8 +1838,8 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
        
 
 #ifdef _WIN32
-				RECT r,r2;
-				GetWindowRect(hwndDlg,&r);
+        RECT r,r2;
+        GetWindowRect(hwndDlg,&r);
         GetWindowRect(GetDlgItem(hwndDlg,IDC_VIEWRECT),&r2);
 
         r.right-=r.left;
@@ -1841,16 +1860,32 @@ static WDL_DLGRET liceCapMainProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM
         HRGN rgn3=CreateRectRgn(0,0,0,0);
         CombineRgn(rgn3,rgn,rgn2,RGN_DIFF);
 
-			  DeleteObject(rgn);
-		    DeleteObject(rgn2);
+        DeleteObject(rgn);
+        DeleteObject(rgn2);
         SetWindowRgn(hwndDlg,rgn3,TRUE);
 #endif
         UpdateDimBoxes(hwndDlg);
 
         InvalidateRect(hwndDlg,NULL,TRUE);
-        
+
       }
     break;
+#if _WIN32
+    case WM_NCHITTEST: /* allow dragging the dialog without mouse capture */
+        {
+            POINT pt;
+            RECT rc;
+            GetCursorPos(&pt);
+            GetClientRect(hwndDlg, &rc);
+            ScreenToClient(hwndDlg, &pt);
+            if (PtInRect(&rc, pt))
+            {
+                SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, HTCAPTION);
+                return 1;
+            }
+        }
+        break;
+#endif
   }
   return 0;
 }

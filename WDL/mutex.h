@@ -52,25 +52,29 @@
 #include "wdltypes.h"
 #include "wdlatomic.h"
 
+#ifdef _DEBUG
+#include <assert.h>
+#endif
+
 class WDL_Mutex {
   public:
     WDL_Mutex() 
     {
-#ifdef _DEBUG
-      _debug_cnt=0;
-#endif
-
 #ifdef _WIN32
       InitializeCriticalSection(&m_cs);
 #elif defined( WDL_MAC_USE_CARBON_CRITSEC)
       MPCreateCriticalRegion(&m_cr);
-#elif defined(PTHREAD_RECURSIVE_MUTEX_INITIALIZER)
+#elif defined(PTHREAD_RECURSIVE_MUTEX_INITIALIZER) && !defined(__linux__)
       const pthread_mutex_t tmp = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
       m_mutex = tmp;
 #else
       pthread_mutexattr_t attr;
       pthread_mutexattr_init(&attr);
       pthread_mutexattr_settype(&attr,PTHREAD_MUTEX_RECURSIVE);
+#ifdef __linux__
+      // todo: macos too?
+      pthread_mutexattr_setprotocol(&attr,PTHREAD_PRIO_INHERIT);
+#endif
       pthread_mutex_init(&m_mutex,&attr);
       pthread_mutexattr_destroy(&attr);
 #endif
@@ -88,10 +92,6 @@ class WDL_Mutex {
 
     void Enter()
     {
-#ifdef _DEBUG
-      _debug_cnt++;
-#endif
-
 #ifdef _WIN32
       EnterCriticalSection(&m_cs);
 #elif defined(WDL_MAC_USE_CARBON_CRITSEC)
@@ -103,10 +103,6 @@ class WDL_Mutex {
 
     void Leave()
     {
-#ifdef _DEBUG
-      _debug_cnt--;
-#endif
-
 #ifdef _WIN32
       LeaveCriticalSection(&m_cs);
 #elif defined(WDL_MAC_USE_CARBON_CRITSEC)
@@ -115,10 +111,6 @@ class WDL_Mutex {
       pthread_mutex_unlock(&m_mutex);
 #endif
     }
-
-#ifdef _DEBUG
-  int _debug_cnt;
-#endif
 
   private:
 #ifdef _WIN32
@@ -129,13 +121,29 @@ class WDL_Mutex {
   pthread_mutex_t m_mutex;
 #endif
 
+  // prevent callers from copying mutexes accidentally
+  WDL_Mutex(const WDL_Mutex &cp)
+  {
+#ifdef _DEBUG
+    assert(sizeof(WDL_Mutex) == 0);
+#endif
+  }
+  WDL_Mutex &operator=(const WDL_Mutex &cp)
+  {
+#ifdef _DEBUG
+    assert(sizeof(WDL_Mutex) == 0);
+#endif
+    return *this;
+  }
+
 } WDL_FIXALIGN;
 
 class WDL_MutexLock {
 public:
   WDL_MutexLock(WDL_Mutex *m) : m_m(m) { if (m) m->Enter(); }
   ~WDL_MutexLock() { if (m_m) m_m->Leave(); }
-private:
+
+  // the caller modifies this, make sure it unlocks the mutex first and locks the new mutex!
   WDL_Mutex *m_m;
 } WDL_FIXALIGN;
 
@@ -187,7 +195,24 @@ class WDL_SharedMutex
 
   private:
     WDL_Mutex m_mutex;
-    int m_sharedcnt;
+    volatile int m_sharedcnt;
+
+    // prevent callers from copying accidentally
+    WDL_SharedMutex(const WDL_SharedMutex &cp)
+    {
+    #ifdef _DEBUG
+      assert(sizeof(WDL_SharedMutex) == 0);
+    #endif
+    }
+    WDL_SharedMutex &operator=(const WDL_SharedMutex &cp)
+    {
+    #ifdef _DEBUG
+      assert(sizeof(WDL_SharedMutex) == 0);
+    #endif
+      return *this;
+    }
+
+
 } WDL_FIXALIGN;
 
 

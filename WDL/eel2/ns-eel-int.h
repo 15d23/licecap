@@ -44,13 +44,15 @@ enum {
   FN_MULTIPLY=0,
   FN_DIVIDE,
   FN_JOIN_STATEMENTS,
+  FN_DENORMAL_LIKELY,
+  FN_DENORMAL_UNLIKELY,
   FN_ADD,
   FN_SUB,
   FN_AND,
   FN_OR,
   FN_UMINUS,
-  FN_UPLUS,
   FN_NOT,
+  FN_NOTNOT,
   FN_XOR,
   FN_SHL,
   FN_SHR,
@@ -106,10 +108,10 @@ typedef struct _codeHandleFunctionRec
   struct _codeHandleFunctionRec *next; // main linked list (only used for high level functions)
   struct _codeHandleFunctionRec *derivedCopies; // separate linked list, head being the main function, other copies being derived versions
 
-  void *startptr; // compiled code (may be cleared + recompiled when shraed)
+  void *startptr; // compiled code (may be cleared + recompiled when shared)
   opcodeRec *opcodes;
 
-  int startptr_size; 
+  int startptr_size;  // 0=no code. -1 = needs calculation. >0 = size.
   int tmpspace_req;
     
   int num_params;
@@ -155,17 +157,36 @@ typedef struct {
   void *ramPtr;
 
   int workTable_size; // size (minus padding/extra space) of workTable -- only used if EEL_VALIDATE_WORKTABLE_USE set, but might be handy to have around too
+  int compile_flags;
 } codeHandleType;
 
+typedef struct
+{
+  EEL_F *value;
+  int refcnt;
+  char isreg;
+  char str[1];
+} varNameRec;
 
+typedef struct 
+{
+  void *ptr;
+  int size, alloc;
+} eel_growbuf;
+#define EEL_GROWBUF(type) union { eel_growbuf _growbuf; type *_tval; }
+#define EEL_GROWBUF_RESIZE(gb, newsz) __growbuf_resize(&(gb)->_growbuf, (newsz)*(int)sizeof((gb)->_tval[0])) // <0 to free, does not realloc down otherwise
+#define EEL_GROWBUF_GET(gb) ((gb)->_tval)
+#define EEL_GROWBUF_GET_SIZE(gb) ((gb)->_growbuf.size/(int)sizeof((gb)->_tval[0]))
 
 typedef struct _compileContext
 {
   eel_function_table *registered_func_tab;
+  const char *(*func_check)(const char *fn_name, void *user); // return error message if not permitted
+  void *func_check_user;
 
-  EEL_F **varTable_Values;
-  char   ***varTable_Names;
-  int varTable_numBlocks;
+  EEL_GROWBUF(varNameRec *) varNameList;
+  EEL_F *varValueStore;
+  int varValueStore_left;
 
   int errVar,gotEndOfInput;
   opcodeRec *result;
@@ -188,6 +209,7 @@ typedef struct _compileContext
 
   // state used while generating functions
   int optimizeDisableFlags;
+  int current_compile_flags;
   struct opcodeRec *directValueCache; // linked list using fn as next
 
   int isSharedFunctions;
@@ -205,12 +227,15 @@ typedef struct _compileContext
   EEL_F (*onString)(void *caller_this, struct eelStringSegmentRec *list);
   EEL_F (*onNamedString)(void *caller_this, const char *name);
 
+  EEL_F *(*getVariable)(void *userctx, const char *name);
+  void *getVariable_userctx;
+
   codeHandleType *tmpCodeHandle;
   
   struct
   {
     int needfree;
-    int __pad;
+    int maxblocks;
     double closefact;
     EEL_F *blocks[NSEEL_RAM_BLOCKS];
   } ram_state
@@ -225,8 +250,6 @@ typedef struct _compileContext
 }
 compileContext;
 
-#define NSEEL_VARS_PER_BLOCK 64
-
 #define NSEEL_NPARAMS_FLAG_CONST 0x80000
 typedef struct functionType {
       const char *name;
@@ -237,15 +260,7 @@ typedef struct functionType {
       NSEEL_PPPROC pProc;
 } functionType;
 
-
-typedef struct
-{
-  int refcnt;
-  char isreg;
-} varNameHdr;
-
-functionType *nseel_getFunctionFromTable(int idx);
-functionType *nseel_getFunctionFromTableEx(compileContext *ctx, int idx);
+functionType *nseel_getFunctionByName(compileContext *ctx, const char *name, int *mchk); // sets mchk (if non-NULL) to how far allowed to scan forward for duplicate names
 
 opcodeRec *nseel_createCompiledValue(compileContext *ctx, EEL_F value);
 opcodeRec *nseel_createCompiledValuePtr(compileContext *ctx, EEL_F *addrValue, const char *namestr);
@@ -300,7 +315,10 @@ EEL_F * NSEEL_CGEN_CALL __NSEEL_RAMAlloc(EEL_F **blocks, unsigned int w);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAMAllocGMEM(EEL_F ***blocks, unsigned int w);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAM_MemSet(EEL_F **blocks,EEL_F *dest, EEL_F *v, EEL_F *lenptr);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAM_MemFree(void *blocks, EEL_F *which);
+EEL_F * NSEEL_CGEN_CALL __NSEEL_RAM_MemTop(void *blocks, EEL_F *which);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAM_MemCpy(EEL_F **blocks,EEL_F *dest, EEL_F *src, EEL_F *lenptr);
+EEL_F NSEEL_CGEN_CALL __NSEEL_RAM_Mem_SetValues(EEL_F **blocks, INT_PTR np, EEL_F **parms);
+EEL_F NSEEL_CGEN_CALL __NSEEL_RAM_Mem_GetValues(EEL_F **blocks, INT_PTR np, EEL_F **parms);
 
 extern EEL_F nseel_ramalloc_onfail; // address returned by __NSEEL_RAMAlloc et al on failure
 extern EEL_F * volatile  nseel_gmembuf_default; // can free/zero this on DLL unload if needed

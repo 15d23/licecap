@@ -73,6 +73,7 @@ private:
 	double	feedback;
 	WDL_TypedBuf<double> buffer;
 	int		bufidx;
+public:
   int __pad;
 
 } WDL_FIXALIGN;
@@ -107,7 +108,7 @@ public:
 
 	  return output;
   }
-  void Reset() { memset(buffer.Get(),0,buffer.GetSize()*sizeof(double)); }
+  void Reset() { filterstore=0; memset(buffer.Get(),0,buffer.GetSize()*sizeof(double)); }
   void setdamp(double val) { damp=val;  }
   void setfeedback(double val) { feedback=val; }
 
@@ -118,6 +119,7 @@ private:
 	double	damp;
 	WDL_TypedBuf<double> buffer;
 	int		bufidx;
+public:
   int __pad;
 } WDL_FIXALIGN;
 

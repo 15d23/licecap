@@ -49,6 +49,7 @@
   #if !defined(WDL_NO_POSIX_FILEWRITE)
     #include <sys/fcntl.h>
     #include <sys/file.h>
+    #include <sys/stat.h>
     #include <sys/errno.h>
     #define WDL_POSIX_NATIVE_WRITE
   #endif
@@ -211,7 +212,14 @@ public:
 #elif defined(WDL_POSIX_NATIVE_WRITE)
     m_bufspace_used=0;
     m_filedes_locked=false;
-    m_filedes=open(filename,O_WRONLY|O_CREAT,0644);
+    m_filedes=open(filename,O_WRONLY|O_CREAT
+        // todo: use fcntl() for platforms when O_CLOEXEC is not available (if we ever need to support them)
+        // (currently the only platform that meets this criteria is macOS w/ old SDK, but we don't use execve()
+        // there
+#ifdef O_CLOEXEC
+        | O_CLOEXEC
+#endif
+        ,0644);
     if (m_filedes>=0)
     {
 
@@ -239,8 +247,8 @@ public:
         if (!wantAppendTo) ftruncate(m_filedes,0);
         else
         {
-          struct stat st;
-          if (!fstat(m_filedes,&st))  SetPosition(st.st_size);
+          struct stat64 st;
+          if (!fstat64(m_filedes,&st))  SetPosition(st.st_size);
         }
       }
 
@@ -276,7 +284,7 @@ public:
    {
      if (m_bufspace.GetSize() > 0 && m_bufspace_used>0)
      {
-       int v=pwrite(m_filedes,m_bufspace.Get(),m_bufspace_used,m_file_position);
+       int v=(int)pwrite(m_filedes,m_bufspace.Get(),m_bufspace_used,m_file_position);
        if (v>0) m_file_position+=v;
        if (m_file_position > m_file_max_position) m_file_max_position=m_file_position;
        m_bufspace_used=0;
@@ -398,7 +406,7 @@ public:
        }
        if (m_bufspace_used >= m_bufspace.GetSize())
        {
-         int v=pwrite(m_filedes,m_bufspace.Get(),m_bufspace_used,m_file_position);
+         int v=(int)pwrite(m_filedes,m_bufspace.Get(),m_bufspace_used,m_file_position);
          if (v>0) m_file_position+=v;
          m_bufspace_used=0;
        }
@@ -407,7 +415,7 @@ public:
    }
    else
    {
-     int v=pwrite(m_filedes,buf,len,m_file_position);
+     int v=(int)pwrite(m_filedes,buf,len,m_file_position);
      if (v>0) m_file_position+=v;
      if (m_file_position > m_file_max_position) m_file_max_position=m_file_position;
      return v;
@@ -594,7 +602,7 @@ public:
     if (m_filedes < 0) return true;
     if (m_bufspace.GetSize() > 0 && m_bufspace_used>0)
     {
-      int v=pwrite(m_filedes,m_bufspace.Get(),m_bufspace_used,m_file_position);
+      int v=(int)pwrite(m_filedes,m_bufspace.Get(),m_bufspace_used,m_file_position);
       if (v>0) m_file_position+=v;
       if (m_file_position > m_file_max_position) m_file_max_position=m_file_position;
       m_bufspace_used=0;

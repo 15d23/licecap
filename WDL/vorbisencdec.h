@@ -54,6 +54,7 @@ public:
   virtual int Available()=0;
   virtual float *Get()=0;
   virtual void Skip(int amt)=0;
+  virtual int GenerateLappingSamples()=0;
 };
 
 class VorbisEncoderInterface
@@ -73,13 +74,14 @@ public:
 #ifndef WDL_VORBIS_INTERFACE_ONLY
 
 #include "../WDL/queue.h"
+#include "../WDL/assocarray.h"
+
 
 class VorbisDecoder : public VorbisDecoderInterface
 {
   public:
     VorbisDecoder()
     {
-      m_samples_used=0;
     	packets=0;
 	    memset(&oy,0,sizeof(oy));
 	    memset(&os,0,sizeof(os));
@@ -153,18 +155,12 @@ class VorbisDecoder : public VorbisDecoderInterface
 					  {
 						  int n,c;
 
-              int newsize=(m_samples_used+(samples+4096)*vi.channels)*sizeof(float);
 
-              if (m_samples.GetSize() < newsize) m_samples.Resize(newsize+32768);
+              float *bufmem = m_buf.Add(NULL,samples*vi.channels);
 
-              float *bufmem = (float *)m_samples.Get();
-
-						  for(n=0;n<samples;n++)
+						  if (bufmem) for(n=0;n<samples;n++)
 						  {
-							  for(c=0;c<vi.channels;c++)
-							  {
-								  bufmem[m_samples_used++]=pcm[c][n];
-							  }							
+							  for(c=0;c<vi.channels;c++) *bufmem++=pcm[c][n];
 						  }
 						  vorbis_synthesis_read(&vd,samples);
 					  }
@@ -178,26 +174,36 @@ class VorbisDecoder : public VorbisDecoderInterface
 			  }
 		  }
     }
-    int Available()
-    {
-      return m_samples_used;
-    }
-    float *Get()
-    {
-      return (float *)m_samples.Get();
-    }
+    int Available() { return m_buf.Available(); }
+    float *Get() { return m_buf.Get(); }
+
     void Skip(int amt)
     {
-      float *sptr=(float *)m_samples.Get();
-      m_samples_used-=amt;
-      if (m_samples_used>0)
-        memcpy(sptr,sptr+amt,m_samples_used*sizeof(float));
-      else m_samples_used=0;
+      m_buf.Advance(amt);
+      m_buf.Compact();
+    }
+    int GenerateLappingSamples()
+    {
+      if (vd.pcm_returned<0 ||
+          !vd.vi ||
+          !vd.vi->codec_setup)
+      {
+        return 0;
+      }
+      float ** pcm;
+      int samples = vorbis_synthesis_lapout(&vd,&pcm);
+      if (samples <= 0) return 0;
+      float *bufmem = m_buf.Add(NULL,samples*vi.channels);
+      if (bufmem) for(int n=0;n<samples;n++)
+      {
+        for (int c=0;c<vi.channels;c++) *bufmem++=pcm[c][n];
+      }
+      return samples;
     }
 
     void Reset()
     {
-      m_samples_used=0;
+      m_buf.Clear();
 
 			vorbis_block_clear(&vb);
 			vorbis_dsp_clear(&vd);
@@ -210,11 +216,10 @@ class VorbisDecoder : public VorbisDecoderInterface
 
   private:
 
-    WDL_HeapBuf m_samples; // we let the size get as big as it needs to, so we don't worry about tons of mallocs/etc
+    WDL_TypedQueue<float> m_buf;
 
     int m_err;
     int packets;
-    int m_samples_used;
 
     ogg_sync_state   oy; /* sync and verify incoming physical bitstream */
     ogg_stream_state os; /* take physical pages, weld into a logical
@@ -236,7 +241,8 @@ class VorbisEncoder : public VorbisEncoderInterface
 {
 public:
 #ifdef VORBISENC_WANT_FULLCONFIG
-  VorbisEncoder(int srate, int nch, int serno, float qv, int cbr=-1, int minbr=-1, int maxbr=-1, const char *encname=NULL)
+  VorbisEncoder(int srate, int nch, int serno, float qv, int cbr=-1, int minbr=-1, int maxbr=-1,
+    const char *encname=NULL, WDL_StringKeyedArray<char*> *metadata=NULL)
 #elif defined(VORBISENC_WANT_QVAL)
   VorbisEncoder(int srate, int nch, float qv, int serno, const char *encname=NULL)
 #else
@@ -263,7 +269,7 @@ public:
     else
       m_err=vorbis_encode_init_vbr(&vi,nch,srate,qv);
 
-#else
+#else // VORBISENC_WANT_FULLCONFIG
 
   #ifndef VORBISENC_WANT_QVAL
       float qv=0.0;
@@ -292,13 +298,29 @@ public:
 
       if (qv<-0.10f)qv=-0.10f;
       if (qv>1.0f)qv=1.0f;
-  #endif
+  #endif // !VORBISENC_WANT_QVAL
 
       m_err=vorbis_encode_init_vbr(&vi,nch,srate>>m_ds,qv);
-#endif
+#endif // !VORBISENC_WANT_FULLCONFIG
 
     vorbis_comment_init(&vc);
     if (encname) vorbis_comment_add_tag(&vc,"ENCODER",(char *)encname);
+
+#ifdef VORBISENC_WANT_FULLCONFIG
+    if (metadata)
+    {
+      for (int i=0; i < metadata->GetSize(); ++i)
+      {
+        const char *key;
+        const char *val=metadata->Enumerate(i, &key);
+        if (key && val && key[0] && val[0])
+        {
+          vorbis_comment_add_tag(&vc, key, val);
+        }
+      }
+    }
+#endif // VORBISENC_WANT_FULLCONFIG
+
     vorbis_analysis_init(&vd,&vi);
     vorbis_block_init(&vd,&vb);
     ogg_stream_init(&os,m_ser=serno);
@@ -358,7 +380,7 @@ public:
     {
       inlen >>= m_ds;
       float **buffer=vorbis_analysis_buffer(&vd,inlen);
-      int i,i2=0;
+      int i=0,i2=0;
       
       if (m_nch==1)
       {

@@ -644,13 +644,19 @@ if(@resourceFiles) {
   # on other image times.
   if($unflattenable &&
    (command($gConfig{'cmd_hdiutil'}, 'unflatten', $targetImage)) != 0) {
-    cleanupDie('hdiutil unflatten failed');
+    # cleanupDie('hdiutil unflatten failed');
+    $unflattenable = 0;
   }
   # Don't push flatten onto the cleanup stack.  If we fail now, we'll be
   # removing $targetImage anyway.
 
   # Type definitions come from Carbon.r.
-  if(command($gConfig{'cmd_Rez'}, 'Carbon.r', @resourceFiles, '-a', '-o',
+  if(command($gConfig{'cmd_Rez'}, 'Carbon.r', @resourceFiles, '-a', 
+        '-F', '/Developer/SDKs/MacOSX10.6.sdk/System/Library/Frameworks/',
+        '-F', '/Developer/SDKs/MacOSX10.6.sdk/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/',
+        '-F', '/Developer/Headers/FlatCarbon/', 
+        '-F', '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/', 
+        '-o',
    $targetImage) != 0) {
     cleanupDie('Rez failed');
   }
@@ -929,10 +935,9 @@ sub diskImageMaker($$$$$$$$) {
       my($hybridImage);
       $hybridImage = giveExtension($tempDir.'/hybrid', '.dmg');
 
-      if(command($gConfig{'cmd_hdiutil'}, 'makehybrid', '-hfs',
-       '-hfs-volume-name', $name, '-hfs-openfolder', $source, '-ov',
-       $source, '-o', $hybridImage) != 0) {
-        cleanupDie('hdiutil makehybrid failed');
+      if(command($gConfig{'cmd_hdiutil'}, 'create', '-volname', $name, 
+                         '-ov', '-fs', 'HFS+', '-srcfolder', $source, '-o', $hybridImage) != 0) {
+        cleanupDie('hdiutil create -srcfolder failed');
       }
 
       $uncompressedImage = $hybridImage;

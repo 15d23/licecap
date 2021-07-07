@@ -1,3 +1,23 @@
+/* Cockos SWELL (Simple/Small Win32 Emulation Layer for Linux/OSX)
+   Copyright (C) 2006 and later, Cockos, Inc.
+
+    This software is provided 'as-is', without any express or implied
+    warranty.  In no event will the authors be held liable for any damages
+    arising from the use of this software.
+
+    Permission is granted to anyone to use this software for any purpose,
+    including commercial applications, and to alter it and redistribute it
+    freely, subject to the following restrictions:
+
+    1. The origin of this software must not be misrepresented; you must not
+       claim that you wrote the original software. If you use this software
+       in a product, an acknowledgment in the product documentation would be
+       appreciated but is not required.
+    2. Altered source versions must be plainly marked as such, and must not be
+       misrepresented as being the original software.
+    3. This notice may not be removed or altered from any source distribution.
+*/
+  
 #import "swellappmain.h"
 
 #include "swell.h"
@@ -27,7 +47,7 @@ static bool IsMultiLineEditControl(NSView *cv, id fs)
 @implementation SWELLApplication
 - (void)sendEvent:(NSEvent *)anEvent
 {
-  int etype = [anEvent type];
+  NSEventType etype = [anEvent type];
   if (etype == NSKeyUp)
   {
     // toss keyup if next keydown is the same key
@@ -160,7 +180,7 @@ static bool IsMultiLineEditControl(NSView *cv, id fs)
 - (void)awakeFromNib
 {      
   SWELL_EnsureMultithreadedCocoa();
-  [NSApp setDelegate:self];
+  [NSApp setDelegate:(id) self];
 
   SWELL_POSTMESSAGE_INIT
   
@@ -176,7 +196,7 @@ static bool IsMultiLineEditControl(NSView *cv, id fs)
 
 -(IBAction)onSysMenuCommand:(id)sender
 {
-  int a = [sender tag];
+  INT_PTR a = (INT_PTR) [(NSMenuItem *)sender tag];
   if (a) SWELLAppMain(SWELLAPP_ONCOMMAND,a,(INT_PTR)sender);
 }
 

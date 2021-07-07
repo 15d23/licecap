@@ -18,6 +18,9 @@
 
 bool GetScreenDataOld(int xpos, int ypos, LICE_IBitmap *bmOut)
 {
+#ifdef MAC_OS_X_VERSION_10_12 // newer SDKs drop support for these APIs
+  return false;
+#else
 #if 0
   NSRect rect=NSMakeRect(xpos,ypos,bmOut->getWidth(),bmOut->getHeight());
   NSRect rect0=NSMakeRect(0,0,rect.size.width,rect.size.height);
@@ -96,7 +99,7 @@ bool GetScreenDataOld(int xpos, int ypos, LICE_IBitmap *bmOut)
   
   [img release];
   return true;
-  
+  #endif
   
 }
 
@@ -302,7 +305,7 @@ bool GetScreenData(int xpos, int ypos, LICE_IBitmap *bmOut)
   }
   static CGColorSpaceRef cs;
   if (!cs) cs=CGColorSpaceCreateDeviceRGB();
-  CGContextRef ctx=CGBitmapContextCreate(bmOut->getBits(),use_w,use_h,8,4*bmOut->getRowSpan(),cs,kCGImageAlphaNoneSkipFirst);
+  CGContextRef ctx=CGBitmapContextCreate(bmOut->getBits(),use_w,use_h,8,4*bmOut->getRowSpan(),cs,kCGImageAlphaNoneSkipFirst|kCGBitmapByteOrder32Host);
   if (!ctx)
   {
     hasNewFailed=true;
@@ -318,10 +321,13 @@ bool GetScreenData(int xpos, int ypos, LICE_IBitmap *bmOut)
   return true;
 }
 
-void DrawTransparentRectInCurrentContext(RECT r)
+
+void SetNSWindowTransparent(HWND h)
 {
-  [[NSColor clearColor] set];
-  NSRectFill(NSMakeRect(r.left,r.top,r.right-r.left,r.bottom-r.top));
+  NSWindow *w = (NSWindow *)h;
+  if ([w isKindOfClass:[NSView class]]) w = [(NSView *)w window];
+  else if (![w isKindOfClass:[NSWindow class]]) return;
+  [w setBackgroundColor:[NSColor clearColor]];
 }
 
 void SetNSWindowOpaque(HWND h, bool op)

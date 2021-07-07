@@ -1,14 +1,10 @@
 #include "lice_text.h"
 #include <math.h>
 
-
-#ifndef _WIN32
-#include "../swell/swell.h"
-#endif
-
-
 #include "lice_combine.h"
 #include "lice_extended.h"
+
+#define IGNORE_SCALING(mode) ((mode)&LICE_BLIT_IGNORE_SCALING)
 
 #if defined(_WIN32) && defined(WDL_SUPPORT_WIN9X)
 static char __1ifNT2if98=0; // 2 for iswin98
@@ -19,7 +15,9 @@ static char __1ifNT2if98=0; // 2 for iswin98
 
 
 // if other methods fail, at this point just flat out refuse to render glyphs (since they would use a ridiculous amount of memory)
+#ifndef ABSOLUTELY_NO_GLYPHS_HIGHER_THAN 
 #define ABSOLUTELY_NO_GLYPHS_HIGHER_THAN 1024 
+#endif
 
 
 static int utf8makechar(char *ptrout, unsigned short charIn)
@@ -203,7 +201,9 @@ bool LICE_CachedFont::RenderGlyph(unsigned short idx) // return TRUE if ok
   if (m_font) oldFont = SelectObject(s_tempbitmap->getDC(),m_font);
   RECT r={0,0,0,0,};
   int advance;
-  const int extra_wid_pad = 2+(m_line_height>=16 ? m_line_height/16 : 0); // overrender right side by this amount, and check to see if it was drawn to
+  const int right_extra_pad = 2+(m_line_height>=16 ? m_line_height/16 : 0); // overrender right side by this amount, and check to see if it was drawn to
+
+  const int left_extra_pad = right_extra_pad; // overrender on left side too
 
 #ifdef _WIN32
 #if defined(WDL_SUPPORT_WIN9X)
@@ -211,10 +211,11 @@ bool LICE_CachedFont::RenderGlyph(unsigned short idx) // return TRUE if ok
 #endif
   {
     WCHAR tmpstr[2]={(WCHAR)idx,0};
-    ::DrawTextW(s_tempbitmap->getDC(),tmpstr,1,&r,DT_CALCRECT|DT_SINGLELINE|DT_LEFT|DT_TOP|DT_NOPREFIX);
+    ::DrawTextW(s_tempbitmap->getDC(),tmpstr,1,&r,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX);
     advance=r.right;
-    r.right += extra_wid_pad;
+    r.right += right_extra_pad+left_extra_pad;
     LICE_FillRect(s_tempbitmap,0,0,r.right,r.bottom,0,1.0f,LICE_BLIT_MODE_COPY);
+    r.left+=left_extra_pad;
     ::DrawTextW(s_tempbitmap->getDC(),tmpstr,1,&r,DT_SINGLELINE|DT_LEFT|DT_TOP|DT_NOPREFIX|DT_NOCLIP);
   }
   #if defined(WDL_SUPPORT_WIN9X)
@@ -229,11 +230,12 @@ bool LICE_CachedFont::RenderGlyph(unsigned short idx) // return TRUE if ok
 #ifndef _WIN32
     if (idx>=128) utf8makechar(tmpstr,idx);
 #endif
-    ::DrawText(s_tempbitmap->getDC(),tmpstr,-1,&r,DT_CALCRECT|DT_SINGLELINE|DT_LEFT|DT_TOP|DT_NOPREFIX);
+    ::DrawText(s_tempbitmap->getDC(),tmpstr,-1,&r,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX);
     advance=r.right;
-    r.right += extra_wid_pad;
+    r.right += right_extra_pad+left_extra_pad;
     LICE_FillRect(s_tempbitmap,0,0,r.right,r.bottom,0,1.0f,LICE_BLIT_MODE_COPY);
-    ::DrawText(s_tempbitmap->getDC(),tmpstr,-1,&r,DT_SINGLELINE|DT_LEFT|DT_TOP|DT_NOPREFIX);
+    r.left += left_extra_pad;
+    ::DrawText(s_tempbitmap->getDC(),tmpstr,-1,&r,DT_SINGLELINE|DT_LEFT|DT_TOP|DT_NOPREFIX|DT_NOCLIP);
   }
 #endif
 
@@ -246,7 +248,7 @@ bool LICE_CachedFont::RenderGlyph(unsigned short idx) // return TRUE if ok
   if (advance < 1 || r.bottom < 1) 
   {
     ent->base_offset=-1;
-    ent->advance=ent->width=ent->height=0;
+    ent->left_extra=ent->advance=ent->width=ent->height=0;
   }
   else
   {
@@ -275,25 +277,39 @@ bool LICE_CachedFont::RenderGlyph(unsigned short idx) // return TRUE if ok
         span=-span;
       }
       int x,y;
-      int max_x=advance;
+      int min_x=left_extra_pad;
+      int max_x=advance + min_x;
+
       for(y=0;y<r.bottom;y++)
       {
         if (flags&LICE_FONT_FLAG_FX_INVERT)
         {
-          for (x=0;x<max_x;x++) *destbuf++ = 255-((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
+          for (x=0;x<min_x;x++)
+          {
+            const unsigned char v=((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
+            *destbuf++ = 255-v;
+            if (v) min_x=x;
+          }
+          for (;x<max_x;x++) *destbuf++ = 255-((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
           for (;x<r.right;x++)
           {
-            unsigned char v=((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
+            const unsigned char v=((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
             if (v) max_x=x+1;
             *destbuf++ = 255-v;
           }
         }
         else
         {
-          for (x=0;x<max_x;x++) *destbuf++ = ((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
+          for (x=0;x<min_x;x++)
+          {
+            const unsigned char v=((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
+            *destbuf++ = v;
+            if (v) min_x=x;
+          }
+          for (;x<max_x;x++) *destbuf++ = ((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
           for (;x<r.right;x++)
           {
-            unsigned char v=((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
+            const unsigned char v=((unsigned char*)(srcbuf+x))[LICE_PIXEL_R];
             if (v) max_x=x+1;
             *destbuf++ = v;
           }
@@ -302,17 +318,18 @@ bool LICE_CachedFont::RenderGlyph(unsigned short idx) // return TRUE if ok
       }
       destbuf -= r.right*r.bottom;
 
-      if (max_x < r.right)
+      if (max_x < r.right || min_x > 0)
       {
-        const unsigned char *rdptr=destbuf;
+        const int neww = max_x-min_x;
+        const unsigned char *rdptr=destbuf + min_x;
         // trim down destbuf
         for (y=0;y<r.bottom;y++)
         {
-          if (destbuf != rdptr) memmove(destbuf,rdptr,max_x);
-          destbuf+=max_x;
+          if (destbuf != rdptr) memmove(destbuf,rdptr,neww);
+          destbuf+=neww;
           rdptr += r.right;
         }
-        r.right = max_x;
+        r.right = neww;
         newsz = ent->base_offset-1+r.right*r.bottom;
         destbuf = m_cachestore.Resize(newsz,false) + ent->base_offset-1;
       }
@@ -413,6 +430,7 @@ bool LICE_CachedFont::RenderGlyph(unsigned short idx) // return TRUE if ok
             }
         }
       }
+      ent->left_extra=left_extra_pad-min_x;
       ent->width = r.right;
       ent->height = r.bottom;
     }
@@ -515,8 +533,21 @@ bool LICE_CachedFont::DrawGlyph(LICE_IBitmap *bm, unsigned short c,
 {
   charEnt *ch = findChar(c);
 
-  if (!ch || 
-      xpos >= clipR->right || 
+  if (!ch) return false;
+
+  if (m_flags&LICE_FONT_FLAG_VERTICAL) 
+  {
+    if ((m_flags&(LICE_FONT_FLAG_VERTICAL|LICE_FONT_FLAG_VERTICAL_BOTTOMUP)) == (LICE_FONT_FLAG_VERTICAL|LICE_FONT_FLAG_VERTICAL_BOTTOMUP))
+      ypos -= ch->left_extra;
+    else
+      ypos += ch->left_extra;
+  }
+  else
+  {
+    xpos -= ch->left_extra;
+  }
+
+  if (xpos >= clipR->right || 
       ypos >= clipR->bottom ||
       xpos+ch->width <= clipR->left || 
       ypos+ch->height <= clipR->top) return false;
@@ -551,7 +582,14 @@ bool LICE_CachedFont::DrawGlyph(LICE_IBitmap *bm, unsigned short c,
 
   if (bm->isFlipped())
   {
-    pout += (bm->getHeight()-1)*dest_span;
+    int bm_h = bm->getHeight();
+    const int __sc = bm ? (int)bm->Extended(LICE_EXT_GET_SCALING,NULL) : 0;
+    if (__sc>0)
+    {
+      __LICE_SCU(bm_h);
+    }
+
+    pout += (bm_h-1)*dest_span;
     dest_span=-dest_span;
   }
   
@@ -566,7 +604,7 @@ bool LICE_CachedFont::DrawGlyph(LICE_IBitmap *bm, unsigned short c,
   float alpha=m_alpha;
   
   if (m_bgmode==OPAQUE)
-    LICE_FillRect(bm,xpos,ypos,width,height,m_bg,alpha,mode);
+    LICE_FillRect(bm,xpos,ypos,width,height,m_bg,alpha,mode|LICE_BLIT_IGNORE_SCALING);
 
   int red=LICE_GETR(m_fg);
   int green=LICE_GETG(m_fg);
@@ -609,8 +647,8 @@ bool LICE_CachedFont::DrawGlyph(LICE_IBitmap *bm, unsigned short c,
         int x;
         for(x=0;x<width;x++) 
         {
-          unsigned char c=gsrc[x];
-          if (c) pout[x]=c==255? col : bkcol;
+          unsigned char cv=gsrc[x];
+          if (cv) pout[x]=cv==255? col : bkcol;
         }
         gsrc += src_span;
         pout += dest_span;
@@ -679,11 +717,35 @@ static BOOL LICE_Text_HasUTF8(const char *_str)
 #endif
 
 
+#define __LICE_SC_DRAWTEXT_RESTORE_RECT \
+      if (__sc > 0 && rect) { \
+        rect->left = (rect->left * 256) / __sc; \
+        rect->top = (rect->top * 256) / __sc; \
+        rect->right = (rect->right * 256) / __sc; \
+        rect->bottom = (rect->bottom * 256) / __sc; \
+      }
+
 int LICE_CachedFont::DrawTextImpl(LICE_IBitmap *bm, const char *str, int strcnt, 
                                RECT *rect, UINT dtFlags)
 {
-  int ret=0;
   if (!bm && !(dtFlags&DT_CALCRECT)) return 0;
+
+  const int __sc = bm ? (int)bm->Extended(LICE_EXT_GET_SCALING,NULL) : 0;
+  int bm_w = bm ? bm->getWidth() : 0;
+  int bm_h = bm ? bm->getHeight() : 0;
+
+  if (__sc>0 && rect)
+  {
+    if (!IGNORE_SCALING(m_comb))
+    {
+      __LICE_SC(rect->left);
+      __LICE_SC(rect->top);
+      __LICE_SC(rect->right);
+      __LICE_SC(rect->bottom);
+    }
+    __LICE_SC(bm_w);
+    __LICE_SC(bm_h);
+  }
 
   bool forceWantAlpha=false;
 
@@ -697,6 +759,8 @@ int LICE_CachedFont::DrawTextImpl(LICE_IBitmap *bm, const char *str, int strcnt,
   // if using line-spacing adjustments (m_lsadj), don't allow native rendering 
   // todo: split rendering up into invidual lines and DrawText calls
 #ifndef LICE_TEXT_NONATIVE
+
+  int ret=0;
   if (!bm || !bm->Extended('YUVx',NULL)) if (((m_flags&LICE_FONT_FLAG_FORCE_NATIVE) && m_font && !forceWantAlpha &&!LICE_Text_IsWine() &&
       !(dtFlags & LICE_DT_USEFGALPHA) &&
       !(m_flags&LICE_FONT_FLAG_PRECALCALL) && !LICE_FONT_FLAGS_HAS_FX(m_flags) &&
@@ -743,10 +807,49 @@ int LICE_CachedFont::DrawTextImpl(LICE_IBitmap *bm, const char *str, int strcnt,
     bool isTmp=false;
     RECT tmp_rect={0,};
 
+#ifdef _WIN32
+    HRGN rgn=NULL;
+#endif
+    RECT nr_subbitmap_clip = {0,};
+    bool nr_subbitmap_clip_use=false;
+    if (!hdc && bm)
+    {
+      LICE_IBitmap *bmt = bm;
+      while (bmt->Extended(LICE_SubBitmap::LICE_GET_SUBBITMAP_VERSION,NULL) == (INT_PTR)LICE_SubBitmap::LICE_SUBBITMAP_VERSION)
+      {
+        LICE_SubBitmap *sb = (LICE_SubBitmap *)bmt;
+        int sub_x = sb->m_x, sub_y = sb->m_y;
+        if (__sc>0)
+        {
+          __LICE_SC(sub_x);
+          __LICE_SC(sub_y);
+        }
+        nr_subbitmap_clip.left += sub_x;
+        nr_subbitmap_clip.top += sub_y;
+        bmt = sb->m_parent;
+        if (!bmt) break; // ran out of parents
+
+        hdc=bmt->getDC();
+        if (hdc)
+        {
+          int sub_w = ((LICE_SubBitmap*)bm)->m_w, sub_h = ((LICE_SubBitmap*)bm)->m_h;
+          if (__sc>0)
+          {
+            __LICE_SC(sub_w);
+            __LICE_SC(sub_h);
+          }
+          nr_subbitmap_clip.right = nr_subbitmap_clip.left + sub_w;
+          nr_subbitmap_clip.bottom = nr_subbitmap_clip.top + sub_h;
+          nr_subbitmap_clip_use=!(dtFlags & DT_CALCRECT);
+          bm = bmt;
+          break;
+        }
+      }
+    }
+
     if (!hdc)
     {
       // use temp buffer -- we could optionally enable this if non-1 alpha was desired, though this only works for BLIT_MODE_COPY anyway (since it will end up compositing the whole rectangle, ugh)
-
       isTmp=true;
 
       if (!s_nativerender_tempbitmap)
@@ -784,8 +887,8 @@ int LICE_CachedFont::DrawTextImpl(LICE_IBitmap *bm, const char *str, int strcnt,
       tmp_rect.bottom = tmp_rect.top + text_size.bottom;
 
       // tmp_rect is the desired rect of drawing, now clip to bitmap (adjusting dt_rect.top/left if starting offscreen)
-      if (tmp_rect.right > bm->getWidth()) tmp_rect.right=bm->getWidth();
-      if (tmp_rect.bottom > bm->getHeight()) tmp_rect.bottom=bm->getHeight();
+      if (tmp_rect.right > bm_w) tmp_rect.right=bm_w;
+      if (tmp_rect.bottom > bm_h) tmp_rect.bottom=bm_h;
 
       int lclip = 0, tclip = 0;
       // clip tmp_rect to rect if not DT_NOCLIP
@@ -810,7 +913,11 @@ int LICE_CachedFont::DrawTextImpl(LICE_IBitmap *bm, const char *str, int strcnt,
 
       if (tmp_rect.bottom <= tmp_rect.top || tmp_rect.right <= tmp_rect.left)  goto finish_up_native_render;
 
-      dtFlags &= ~(DT_BOTTOM|DT_RIGHT|DT_CENTER|DT_VCENTER|DT_NOCLIP);
+      dtFlags &= ~(DT_BOTTOM|DT_RIGHT|DT_CENTER|DT_VCENTER);
+
+      int left_overrender = 2+(m_line_height>=16 ? m_line_height/16 : 0);
+      if (left_overrender>tmp_rect.left) left_overrender=tmp_rect.left;      
+      tmp_rect.left -= left_overrender;
 
       if (tmp_rect.right-tmp_rect.left > s_nativerender_tempbitmap->getWidth() || 
           tmp_rect.bottom-tmp_rect.top > s_nativerender_tempbitmap->getHeight())
@@ -823,6 +930,7 @@ int LICE_CachedFont::DrawTextImpl(LICE_IBitmap *bm, const char *str, int strcnt,
 
       LICE_Blit(s_nativerender_tempbitmap, bm, 0, 0, &tmp_rect, 1.0f, LICE_BLIT_MODE_COPY);
 
+      dt_rect.left += left_overrender;
       dt_rect.right=tmp_rect.right;
       dt_rect.bottom=tmp_rect.bottom;
     }
@@ -836,11 +944,41 @@ int LICE_CachedFont::DrawTextImpl(LICE_IBitmap *bm, const char *str, int strcnt,
     ::SetBkMode(hdc,m_bgmode);
     if (m_bgmode==OPAQUE) ::SetBkColor(hdc,RGB(LICE_GETR(m_bg),LICE_GETG(m_bg),LICE_GETB(m_bg)));
 
+    if (nr_subbitmap_clip_use)
+    {
+#ifdef _WIN32
+      rgn=CreateRectRgn(0,0,0,0);
+      if (!GetClipRgn(hdc,rgn))
+      {
+        DeleteObject(rgn);
+        rgn=NULL;
+      }
+      IntersectClipRect(hdc,nr_subbitmap_clip.left,nr_subbitmap_clip.top,nr_subbitmap_clip.right,nr_subbitmap_clip.bottom);
+#else
+      SWELL_PushClipRegion(hdc);
+      SWELL_SetClipRegion(hdc,&nr_subbitmap_clip);
+#endif
+      dt_rect.left += nr_subbitmap_clip.left;
+      dt_rect.top += nr_subbitmap_clip.top;
+      dt_rect.right += nr_subbitmap_clip.left;
+      dt_rect.bottom += nr_subbitmap_clip.top;
+    }
+
     ret = 
 #ifdef _WIN32
       wtmp ? ::DrawTextW(hdc,wtmp,-1,&dt_rect,dtFlags|DT_NOPREFIX) : 
 #endif
       ::DrawText(hdc,str,strcnt,&dt_rect,dtFlags|DT_NOPREFIX);
+
+    if (nr_subbitmap_clip_use)
+    {
+#ifdef _WIN32
+      SelectClipRgn(hdc,rgn); // if rgn is NULL, clears region
+      if (rgn) DeleteObject(rgn);
+#else
+      SWELL_PopClipRegion(hdc);
+#endif
+    }
 
     if (isTmp) 
       LICE_Blit(bm, s_nativerender_tempbitmap,  tmp_rect.left, tmp_rect.top, 
@@ -854,6 +992,10 @@ finish_up_native_render:
 #ifdef _WIN32
     if (wtmp!=wtmpbuf) free(wtmp);
 #endif
+
+    __LICE_SC_DRAWTEXT_RESTORE_RECT
+    if (__sc>0) ret = (ret * 256) / __sc;
+
     return ret;
   }
 #endif
@@ -913,7 +1055,7 @@ finish_up_native_render:
         {
           if (m_flags&LICE_FONT_FLAG_VERTICAL) 
           {
-            const int yext = ypos + ent->height;
+            const int yext = ypos + ent->height - ent->left_extra;
             ypos += ent->advance;
             if (xpos+ent->width>max_xpos) max_xpos=xpos+ent->width;
             if (ypos>max_ypos) max_ypos=ypos;
@@ -921,7 +1063,7 @@ finish_up_native_render:
           }
           else
           {
-            const int xext = xpos + ent->width;
+            const int xext = xpos + ent->width - ent->left_extra;
             xpos += ent->advance;
             if (ypos+ent->height>max_ypos) max_ypos=ypos+ent->height;         
             if (xpos>max_xpos) max_xpos=xpos;
@@ -935,7 +1077,10 @@ finish_up_native_render:
     rect->bottom = rect->top+max_ypos;
 
 
-    return (m_flags&LICE_FONT_FLAG_VERTICAL) ? max_xpos : max_ypos;
+    int retval = (m_flags&LICE_FONT_FLAG_VERTICAL) ? max_xpos : max_ypos;
+    __LICE_SC_DRAWTEXT_RESTORE_RECT
+    if (__sc>0) return (retval * 256) / __sc;
+    return retval;
   }
   float alphaSave  = m_alpha;
 
@@ -947,6 +1092,7 @@ finish_up_native_render:
   if (m_alpha==0.0) 
   {
     m_alpha=alphaSave;
+    __LICE_SC_DRAWTEXT_RESTORE_RECT
     return 0;
   }
 
@@ -963,6 +1109,11 @@ finish_up_native_render:
   {
     RECT tr={0,};
     DrawTextImpl(bm,str,strcnt,&tr,DT_CALCRECT|(dtFlags & DT_SINGLELINE)|(forceWantAlpha?LICE_DT_NEEDALPHA:0));
+    if (__sc > 0)
+    {
+      __LICE_SC(tr.right);
+      __LICE_SC(tr.bottom);
+    }
     if (dtFlags & DT_CENTER)
     {
       xpos += (use_rect.right-use_rect.left-tr.right)/2;
@@ -987,6 +1138,7 @@ finish_up_native_render:
   {
     RECT tr={0,};
     DrawTextImpl(bm,str,strcnt,&tr,DT_CALCRECT|(dtFlags & DT_SINGLELINE)|(forceWantAlpha?LICE_DT_NEEDALPHA:0));
+    if (__sc > 0) __LICE_SC(tr.bottom);
     ypos += tr.bottom;
   }
 
@@ -1000,19 +1152,20 @@ finish_up_native_render:
   {
     if (use_rect.left<0)use_rect.left=0;
     if (use_rect.top<0) use_rect.top=0;
-    if (use_rect.right > bm->getWidth()) use_rect.right = bm->getWidth();
-    if (use_rect.bottom > bm->getHeight()) use_rect.bottom = bm->getHeight();
+    if (use_rect.right > bm_w) use_rect.right = bm_w;
+    if (use_rect.bottom > bm_h) use_rect.bottom = bm_h;
     if (use_rect.right <= use_rect.left || use_rect.bottom <= use_rect.top)
     {
       m_alpha=alphaSave;
+      __LICE_SC_DRAWTEXT_RESTORE_RECT
       return 0;
     }
   }
   else
   {
     use_rect.left=use_rect.top=0;
-    use_rect.right = bm->getWidth();
-    use_rect.bottom = bm->getHeight();
+    use_rect.right = bm_w;
+    use_rect.bottom = bm_h;
   }
 
 
@@ -1088,5 +1241,8 @@ finish_up_native_render:
   }
 
   m_alpha=alphaSave;
-  return (m_flags&LICE_FONT_FLAG_VERTICAL) ? max_xpos - start_x : max_ypos - start_y;
+  int retv = (m_flags&LICE_FONT_FLAG_VERTICAL) ? max_xpos - start_x : max_ypos - start_y;
+  __LICE_SC_DRAWTEXT_RESTORE_RECT
+  if (__sc>0) return (retv*256)/__sc;
+  return retv;
 }

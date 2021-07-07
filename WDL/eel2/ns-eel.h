@@ -37,8 +37,10 @@
 
 #if EEL_F_SIZE == 4
 typedef float EEL_F;
+typedef float *EEL_F_PTR;
 #else
 typedef double EEL_F WDL_FIXALIGN;
+typedef double *EEL_F_PTR;
 #endif
 
 #ifdef _MSC_VER
@@ -123,13 +125,18 @@ void NSEEL_VM_free(NSEEL_VMCTX ctx); // free when done with a VM and ALL of its 
 
 void NSEEL_VM_SetFunctionTable(NSEEL_VMCTX, eel_function_table *tab); // use NULL to use default (global) table
 
+// validateFunc can return error message if not permitted
+void NSEEL_VM_SetFunctionValidator(NSEEL_VMCTX, const char * (*validateFunc)(const char *fn_name, void *user), void *user);
+
 void NSEEL_VM_remove_unused_vars(NSEEL_VMCTX _ctx);
 void NSEEL_VM_clear_var_refcnts(NSEEL_VMCTX _ctx);
 void NSEEL_VM_remove_all_nonreg_vars(NSEEL_VMCTX _ctx);
 void NSEEL_VM_enumallvars(NSEEL_VMCTX ctx, int (*func)(const char *name, EEL_F *val, void *ctx), void *userctx); // return false from func to stop
 
 EEL_F *NSEEL_VM_regvar(NSEEL_VMCTX ctx, const char *name); // register a variable (before compilation)
+EEL_F *NSEEL_VM_getvar(NSEEL_VMCTX ctx, const char *name); // get a variable (if registered or created by code)
 int  NSEEL_VM_get_var_refcnt(NSEEL_VMCTX _ctx, const char *name); // returns -1 if not registered, or >=0
+void NSEEL_VM_set_var_resolver(NSEEL_VMCTX ctx, EEL_F *(*res)(void *userctx, const char *name), void *userctx); 
 
 void NSEEL_VM_freeRAM(NSEEL_VMCTX ctx); // clears and frees all (VM) RAM used
 void NSEEL_VM_freeRAMIfCodeRequested(NSEEL_VMCTX); // call after code to free the script-requested memory
@@ -146,6 +153,12 @@ void NSEEL_VM_FreeGRAM(void **ufd); // frees a gmem context.
 void NSEEL_VM_SetCustomFuncThis(NSEEL_VMCTX ctx, void *thisptr);
 
 EEL_F *NSEEL_VM_getramptr(NSEEL_VMCTX ctx, unsigned int offs, int *validCount);
+EEL_F *NSEEL_VM_getramptr_noalloc(NSEEL_VMCTX ctx, unsigned int offs, int *validCount);
+
+
+// set 0 to query. returns actual value used (limits, granularity apply -- see NSEEL_RAM_BLOCKS)
+int NSEEL_VM_setramsize(NSEEL_VMCTX ctx, int maxent);
+
 
 struct eelStringSegmentRec {
   struct eelStringSegmentRec *_next;
@@ -163,6 +176,8 @@ int nseel_stringsegments_tobuf(char *bufOut, int bufout_sz, struct eelStringSegm
 NSEEL_CODEHANDLE NSEEL_code_compile(NSEEL_VMCTX ctx, const char *code, int lineoffs);
 #define NSEEL_CODE_COMPILE_FLAG_COMMONFUNCS 1 // allows that code's functions to be used in other code (note you shouldn't destroy that codehandle without destroying others first if used)
 #define NSEEL_CODE_COMPILE_FLAG_COMMONFUNCS_RESET 2 // resets common code functions
+#define NSEEL_CODE_COMPILE_FLAG_NOFPSTATE 4 // hint that the FPU/SSE state should be good-to-go
+#define NSEEL_CODE_COMPILE_FLAG_ONLY_BUILTIN_FUNCTIONS 8 // very restrictive mode (only math functions really)
 
 NSEEL_CODEHANDLE NSEEL_code_compile_ex(NSEEL_VMCTX ctx, const char *code, int lineoffs, int flags);
 
@@ -215,10 +230,16 @@ extern int NSEEL_RAM_memused_errors;
 //  php a2x64.php macho64x
 // this will regenerate the .asm files and object files
 
-// 128*65536 = ~8million entries. (64MB RAM used)
+// 512 * 65536 = 32 million entries maximum (256MB RAM)
+// default is limited to 128 * 65536 = 8 million entries (64MB RAM)
 
+// default to 8 million entries, use NSEEL_VM_setramsize() to change at runtime
+#define NSEEL_RAM_BLOCKS_DEFAULTMAX 128
 
-#define NSEEL_RAM_BLOCKS_LOG2 7
+// 512 entry block table maximum (2k/4k per VM)
+#define NSEEL_RAM_BLOCKS_LOG2 9
+
+ // 65536 items per block (512KB)
 #define NSEEL_RAM_ITEMSPERBLOCK_LOG2 16
 
 #define NSEEL_RAM_BLOCKS (1 << NSEEL_RAM_BLOCKS_LOG2)
@@ -230,7 +251,11 @@ extern int NSEEL_RAM_memused_errors;
 //#define EEL_TARGET_PORTABLE
 
 #ifdef EEL_TARGET_PORTABLE
+#ifdef EEL_PORTABLE_TAILCALL
+typedef void (*EEL_BC_TYPE)(void *next_inst, void *state);
+#else
 #define EEL_BC_TYPE int
+#endif
 #endif
 
 #ifdef NSEEL_EEL1_COMPAT_MODE
@@ -240,7 +265,10 @@ double *NSEEL_getglobalregs();
 void eel_setfp_round(); // use to set fp to rounding mode (normal) -- only really use this when being called from EEL
 void eel_setfp_trunc(); // use to restore fp to trunc mode -- only really use this when being called from EEL
 
+void eel_enterfp(int s[2]);
+void eel_leavefp(int s[2]);
 
+extern void *(*nseel_gmem_calloc)(size_t,size_t); // set this to the calloc() implementation used by the context that will call NSEEL_VM_FreeGRAM()
 
 #ifdef __cplusplus
 }

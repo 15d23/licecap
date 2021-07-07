@@ -3,6 +3,7 @@
 <?
 
 $sign_by = isset($argv[1]) ? $argv[1] : "";
+$notarize_email = $sign_by != "" && isset($argv[2]) ? $argv[2] : "";
 $src_build_dir = "Release";
 
 function copy_text_replace_line($infn, $outfn, $srctext, $desttext)
@@ -27,7 +28,7 @@ function regsearch_file($fn, $pattern)
   $fp=fopen($fn,"r");
   if (!$fp) { echo "regsearch_file($fn) could not open file.\n";  return false; }
 
-  while (($x = fgets($fp))) if (ereg($pattern,$x,$regs)) return $regs; 
+  while (($x = fgets($fp))) if (preg_match($pattern,$x,$regs)) return $regs; 
 
   fclose($fp);
   return false;
@@ -37,7 +38,7 @@ function regsearch_file($fn, $pattern)
 $verstr1 = "";
 $verstr1_full = "";
 
-$regs = regsearch_file("licecap_version.h",'#define LICECAP_VERSION "v(.*)".*$');
+$regs = regsearch_file("licecap_version.h",'/^#define LICECAP_VERSION "v(.*)".*$/');
 if ($regs) $verstr1 = str_replace(".","",$verstr1_full=$regs[1]);
 
 echo "APP version $verstr1\n";
@@ -82,32 +83,32 @@ system("cp whatsnew.txt $workdir/LICEcap");
 if ($sign_by != "") 
 {
   echo "signing code as $sign_by\n";
-  system("codesign -s \"$sign_by\" $workdir/LICEcap/LICEcap.app");
+  if ($notarize_email != "")
+  {
+    system("codesign --force --options runtime --timestamp --deep --sign \"$sign_by\" --entitlements ./LICEcap.entitlements $workdir/LICEcap/LICEcap.app",$rv);
+    if ($rv) die("error signing\n");
+    system("rm -f licecap.zip");
+    system("zip -r licecap.zip $workdir/LICEcap/LICEcap.app");
+    system("xcrun altool -t osx -f licecap.zip --primary-bundle-id com.cockos.LICEcap --notarize-app --username $notarize_email --password \"@keychain:Developer-altool\"");
+    echo "uploading, now spawning a subshell to wait to continue!!!\n";
+    echo "uploading, now spawning a subshell to wait to continue!!!\n";
+    echo "uploading, now spawning a subshell to wait to continue!!!\n";
+    system("bash");
+    system("xcrun stapler staple $workdir/LICEcap/LICEcap.app");
+  }
+  else
+    system("codesign -s \"$sign_by\" $workdir/LICEcap/LICEcap.app");
 }
 
-/*
+$destfile = "./build/licecap$ver.dmg";
 
-$tmp = "$workdir/LICEcap/Source";
-system("mkdir $tmp");
-system("cp requires_wdl.txt $tmp/");
-$tmp .= "/LICEcap";
-system("mkdir $tmp");
+system("perl ./pkg-dmg --format UDBZ --target $destfile --source $workdir/LICEcap --license ./license-cleaned.txt --copy stage_DS_Store:/.DS_Store --symlink /Applications:/Applications --mkdir .background --copy background.png:.background --volname LICECAP_INSTALL --icon licecap.icns --config cmd_SetFile=/Applications/Xcode.app/Contents/Developer/usr/bin/SetFile --config cmd_Rez=/Applications/Xcode.app/Contents/Developer/usr/bin/Rez");
 
-system("cp installer.nsi license.txt licecap.dsw licecap_cli.dsp licecap_gui.dsp icon1.ico licecap.rc resource.h licecap_version.h $tmp/");
-system("cp licecap_cli.cpp licecap_ui.cpp requires_wdl.txt whatsnew.txt licecap.icns capturewindow.mm licecap-Info.plist $tmp/");
-system("cp background.png main.m licecap_Prefix.pch makedmg.sh pkg-dmg stage_DS_Store $tmp/");
+system("sh ./make-license-xml.sh $destfile");
 
-system("mkdir $tmp/English.lproj");
-system("cp English.lproj/* $tmp/English.lproj/");
-
-system("mkdir $tmp/licecap.xcodeproj");
-system("cp licecap.xcodeproj/project.pbxproj $tmp/licecap.xcoderoj/");
-
-*/
-
-
-system("perl ./pkg-dmg --format UDBZ --target ./build/licecap$ver.dmg --source $workdir/LICEcap --license ./license-cleaned.txt --copy stage_DS_Store:/.DS_Store --symlink /Applications:/Applications --mkdir .background --copy background.png:.background --volname LICECAP_INSTALL --icon licecap.icns");
-
-
+if ($sign_by != "")
+{
+  system("codesign -s \"$sign_by\" $destfile");
+}
 
 ?>
